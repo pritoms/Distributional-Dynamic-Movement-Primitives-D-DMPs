@@ -384,123 +384,8 @@ class DistributionalDMP(object):
         return trajectory
 
 
-class GaussianProcess(nn.Module):
-    """
-    This class implements a sparse Gaussian process used for learning the distributions of the semi-definite representations.
-    """
-    def __init__(self, input_dim, output_dim, basis_stddev=0.5, num_basis=10, dtype=torch.float64, device='cpu'):
-        """
-        Initialize a GaussianProcess object.
-        Arguments:
-            input_dim (int): The dimension of the input.
-            output_dim (int): The dimension of the output.
-            basis_stddev (float): The standard deviation of the basis functions.
-            num_basis (int): The number of basis functions to use.
-            dtype (torch.dtype): The type used for computations.
-            device (str): The compute device to use - 'cpu' or 'cuda'.
-        """
-        # Call the parent init function
-        super(GaussianProcess, self).__init__()
-        # Set the input and output dimensions
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        # Set the number of basis functions
-        self.num_basis = num_basis
-        # Set the standard deviation of the basis functions
-        self.stddev = basis_stddev
-        # Set the type and device used for computations
-        self.dtype = dtype
-        self.device = device
-        # Create the basis functions
-        self.num_timesteps = 0
-        self.basis = None
-        self.create_basis()
-        # Initialize the weights
-        self.w = torch.nn.Parameter(torch.zeros(self.output_dim, self.num_basis).type(self.dtype))
-
-    def create_basis(self):
-        """
-        Create the basis functions for this Gaussian process.
-        """
-        # Create the basis function for this GP
-        self.basis = torch.zeros((1, self.input_dim, self.num_basis)).type(self.dtype)
-        # Run through the number of basis functions
-        for i in range(self.num_basis):
-            # Set this basis function to be a 1-D Gaussian centered at a random location between 0 and 1
-            mu = np.random.rand()
-            self.basis[0, :, i] = torch.tensor(gaussian_pdf(np.linspace(0, 1, self.input_dim), mu=mu, sigma=self.stddev)).type(self.dtype)
-
-    def forward(self, x):
-        """
-        Compute the output for the given input.
-        Arguments:
-            x (torch.Tensor): The input values.
-        Returns:
-            torch.Tensor: The output values.
-        """
-        # Check if we have a single input dimension
-        if len(x.shape) == 2:
-            # Reshape the inputs
-            x = x.view(-1, 1, self.input_dim)
-        # Get the number of timesteps
-        num_timesteps = x.shape[1]
-        # Check if we need to update the basis function
-        if num_timesteps > self.num_timesteps:
-            # Update the number of timesteps
-            self.num_timesteps = num_timesteps
-            # Expand the basis functions
-            self.basis = torch.zeros((num_timesteps, self.input_dim, self.num_basis)).type(self.dtype)
-            for i in range(self.num_basis):
-                mu = np.random.rand()
-                self.basis[:, :, i] = torch.tensor(gaussian_pdf(np.linspace(0, 1, self.input_dim), mu=mu, sigma=self.stddev)).type(self.dtype)
-        # Broadcast to compute the Gaussian process across all timesteps
-        x = x.unsqueeze(-1) * self.basis
-        # Return the linear combination of the basis functions
-        return x @ torch.transpose(self.w, 0, 1)
-
-    def mu(self, t):
-        """
-        Compute the means of the Gaussian distributions at the given time step.
-        Arguments:
-            t (int): The timestep to compute the means for.
-        Returns:
-            torch.Tensor: The computed mean values for the given timestep.
-        """
-        # Compute the mean for each basis function
-        mean = torch.sum(torch.expand_dims(self.basis[t, :], dim=-1) * torch.expand_dims(self.w, dim=0), dim=1)
-        # Return the means
-        return mean
-
-    def sigma(self, t):
-        """
-        Compute the standard deviations of the Gaussian distributions at the given time step.
-        Arguments:
-            t (int): The timestep to compute the standard deviations for.
-        Returns:
-            torch.Tensor: The computed standard deviation values for the given timestep.
-        """
-        # Compute the variance for each basis function
-        variance = torch.sum(torch.expand_dims(self.basis[t, :]**2, dim=-1) * torch.expand_dims(self.w**2, dim=0) - self.mu(t)**2, dim=1)
-        # Return the standard deviations
-        return torch.sqrt(variance)
-
-
 class ColumnSpace(object):
-    """
-    This class implements a supervised approach to learning a semi-definite representation.
-    """
     def __init__(self, input_dim, output_dim, num_basis=20, basis_stddev=0.5, num_samples=10, dtype=torch.float64, device='cpu'):
-        """
-        Initialize a ColumnSpace object.
-        Arguments:
-            input_dim (int): The dimension of the input.
-            output_dim (int): The dimension of the output.
-            num_basis (int): The number of basis functions for each GP.
-            basis_stddev (float): The standard deviation of the basis functions.
-            num_samples (int): The number of samples to use.
-            dtype (torch.dtype): The type used for computations.
-            device (str): The compute device to use - 'cpu' or 'cuda'.
-        """
         # Set the input and output dimensions
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -517,21 +402,29 @@ class ColumnSpace(object):
         )
 
     def compute_sdr(self, intention):
-        """
-        Compute the semi-definite representation corresponding to the given intention.
-        Arguments:
-            intention (np.ndarray): The intention to compute the semi-definite representation for.
-        Returns:
-            np.ndarray: The desired semi-definite representation.
-        """
         return self.columns(intention).data.numpy()
 
     def columns(self, intention):
-        """
-        Compute the columns of the semi-definite representation corresponding to the given intention.
-        Arguments:
-            intention (np.ndarray): The intention to compute the columns of the semi-definite representation for.
-        Returns:
-            np.ndarray: The columns of the semi-definite representation.
-        """
         return self.model(torch.tensor(intention).type(self.dtype))
+
+    def project(self, sdr):
+        # Check if we are in column space
+        y = self.compute_sdr(sdr)
+        # Compute the projected output
+        x = np.transpose(y, (0, 2, 1)) @ np.transpose([gp.w.detach().numpy() for gp in self.gps])
+        return x
+
+    def train(self, inputs, outputs):
+        # Train the model
+        self.model.train()
+        for i in range(len(outputs)):
+            # Forward pass through the model
+            y = self.model(torch.tensor(inputs[i]).type(self.dtype))
+            # Get the loss
+            loss = torch.mean((y - torch.tensor(outputs[i]).type(self.dtype).view(-1, 1, self.output_dim))**2)
+            # Zero the gradients
+            self.model.zero_grad()
+            # Backward pass through the model
+            loss.backward()
+            # Update the gradients
+            self.optimizer.step()

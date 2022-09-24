@@ -88,7 +88,7 @@ Alternatively, you can install the dependencies listed in `requirements.txt`.
 
 ### Goal Babbling
 
-In `goal_babbling_example.py` we give an example of how to generate goal babbling trajectories (see [Kumar and Russell 2018](https://arxiv.org/abs/1806.05457)) using the `save_goal_babbling_trajectories` function.
+In `goal_babbling_example.py` we give an example of how to generate goal babbling trajectories using the `save_goal_babbling_trajectories` function.
 
 #### Generate Goal Babbling Trajectories
 

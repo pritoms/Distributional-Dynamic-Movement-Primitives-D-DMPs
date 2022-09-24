@@ -1,56 +1,35 @@
-import os
+import glob
+import pickle
 import torch
-import numpy as np
-from torch.utils.data import Dataset
 
-class DataLoader(Dataset):
+
+class DataLoader(object):
     """
-    This class is used to load the data generated using the Matlab implementation of D-DMPs.
+    This class loads in the data generated in Matlab and stores it as a torch tensor.
     """
-    def __init__(self, path, shuffle=True):
+    def __init__(self, path, shuffle=False):
         """
-        Initialize the DataLoader object.
+        Initialize a DataLoader object.
         Arguments:
             path (str): The path to where the data is stored.
-            shuffle (bool): Whether or not to shuffle the data.
+            shuffle (bool): Whether or not to shuffle the data samples.
         """
-        self.path = path
-        self.shuffle = shuffle
-
-        # Get all the files in the given directory
-        self.files = os.listdir(path)
-
-        # Shuffle the files if necessary
-        if self.shuffle:
-            np.random.shuffle(self.files)
-
-    def __len__(self):
-        """
-        Return the number of files in the given directory.
-        Returns:
-            int: The number of files in the given directory.
-        """
-        return len(self.files)
+        # Get all the pickle file paths
+        self.paths = sorted(glob.glob('{0}/*.p'.format(path)))
+        if shuffle:
+            # Shuffle the paths
+            np.random.shuffle(self.paths)
+        self.num_samples = len(self.paths)
 
     def __getitem__(self, idx):
         """
-        Get the data for the given index.
+        Get an item from the data loader.
         Arguments:
-            idx (int): The index of the data to get.
+            idx (int): The index of the sample to get.
         Returns:
-            :obj:`torch.Tensor`: The input data.
-            :obj:`torch.Tensor`: The output data.
-            :obj:`torch.Tensor`: The intention data.
+            tuple: A tuple containing the inputs, outputs, and intentions for this data point.
         """
-        # Get the file name
-        filename = self.files[idx]
-
-        # Load the data
-        data = np.load(os.path.join(self.path, filename))
-
-        # Get the inputs, outputs, and intentions
-        inputs = torch.from_numpy(data['inputs']).float()
-        outputs = torch.from_numpy(data['outputs']).float()
-        intentions = torch.from_numpy(data['intentions']).float()
-
-        return inputs, outputs, intentions
+        with open(self.paths[idx], 'rb') as f:
+            # Load in the data
+            u, yd, yi, tau = pickle.load(f)
+        return torch.tensor(u).float(), torch.tensor(yd).float(), torch.tensor(yi).float()
